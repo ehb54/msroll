@@ -13,7 +13,8 @@ LD = cc
 #uncomment the gcc and comment the cc for using gcc for linking
 #LD = gcc
 
-CFLAGS = -c -march=native
+CFLAGS = -c
+#-march=native -O3
 INCLUDES = ms.h msenum.h mslimit.h msdefault.h msstruct.h msglobal.h msfunction.h
 BIN = ../bin/
 
@@ -35,7 +36,7 @@ msrecord.o: msrecord.c ${INCLUDES}
 	${CC} ${CFLAGS} msrecord.c
 mscept.o: mscept.c ${INCLUDES}
 	${CC} ${CFLAGS} mscept.c
-	
+
 # SGI Open Inventor 3D file format
 
 msinventor.o: msinventor.c ${INCLUDES}
@@ -83,7 +84,7 @@ msvolume.o: msvolume.c ${INCLUDES}
 	${CC} ${CFLAGS} msvolume.c
 
 # Solid Angle (omega)
-	
+
 mssolid.o: mssolid.c ${INCLUDES}
 	${CC} ${CFLAGS} mssolid.c
 mscritical.o: mscritical.c ${INCLUDES}
@@ -168,7 +169,7 @@ msplotio.o: msplotio.c ${INCLUDES}
 	${CC} ${CFLAGS} msplotio.c
 
 # Protein Shape Library
-	
+
 msset.o: msset.c ${INCLUDES}
 	${CC} ${CFLAGS} msset.c
 
@@ -284,10 +285,9 @@ mstran: mstran0.o mstran.o ms.o mscept.o \
 
 nomsdraw:
 	rm msdraw0.? msdraw.? msdrawio.? msscript.? msplot.? msplotio.? msmodel.? msrender.? msbuffer.?
-	
+
 nomsform:
 	rm msform0.? msform.? msdensity.? msphnden?.? mssolid.? msoringe.?
-	
 
 clean:
 	/bin/rm -f *.o

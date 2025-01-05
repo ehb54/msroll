@@ -259,7 +259,7 @@ int read_atom_file(struct array *atom_lines, char *format, char *setname)
 		include_member (these, ATOM, atom_number);
 		if (set_number > 0)
 			include_member (set_number, ATOM, atom_number);
-		if (vdw_type == 0) {
+		if (vdw_type == 0 && format_type != XYZR_FORMAT) {
 			include_member (unknowns, ATOM, atom_number);
 			n_vdw_zero++;
 			for (ii = 0; ii < 4; ii++)

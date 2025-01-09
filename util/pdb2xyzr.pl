@@ -18,6 +18,8 @@ open $fh, $f || die "$f open error $!\n";
 @l = <$fh>;
 close $fh;
 
+$bserial = 1;
+
 foreach $l ( @l ) {
     my $r = pdb_fields( $l );
     next if $r->{"recname"}  !~ /^(ATOM|HETATM)$/;
@@ -31,6 +33,7 @@ foreach $l ( @l ) {
 
     my $r       = 1.5;
 
-    print "$x $y $z $r $resname $serial $name\n";
-
+    #    print "$x $y $z $r $resname $serial $name\n";
+    print "$x $y $z $r UNK $bserial UNKA\n";
+    $bserial++;
 }

@@ -1,18 +1,25 @@
 #!/usr/bin/perl
 
 $msrollcmd       = "/Users/eb/besttest/msroll/bin/msroll_xyzr";
+$msdrawcmd       = "/Users/eb/besttest/msroll/bin/msdraw";
 $bestcmd         = "/Users/eb/bin/bestnotty";
+$rcoalcmd        = "/Users/eb/bin/rcoalnotty";
 $ussaxsutilcmd   = ". ~/ultrascan3-somo-dev/qt5env;~/ultrascan3-somo-dev/us_somo/bin/us_saxs_cmds_t.app/Contents/MacOS/us_saxs_cmds_t";
-$c3p2bmcmd       = "../c3p2beadmodel.pl";
-$maxproc         = 4;
-$maxtriangles    = 6000;
+$c3p2bmcmd       = "/Users/eb/besttest/msroll/util/c3p2beadmodel.pl";
+$maxproc         = 3;
+$maxtriangles    = 10000;
 
-$startfine = .2;
-$endfine   = 1;
-$deltafine = 0.02;
+$startfine   = .3;
+$endfine     = .6;
+$deltafine   = 0.05;
+$proberadius = 1.5;
+$global_nmin = 3000;
+$global_nmax = 6000;
 
 $notes = "
-usage: $0 beadmodel
+usage: $0 {options} beadmodel
+
+options: -r use rcoal
 
 name is the basename of the beadmodel
 makes a directory for the processing (name)
@@ -26,6 +33,10 @@ digests best results to produce name.csv
 ";
 
 $f = shift || die $notes;
+if ( $f eq '-r' ) {
+    $rcoal++;
+    $f = shift || die $notes;
+}
 
 die "$f does not exist\n" if !-e $f;
 die "$f does not end in .bead_model\n" if $f !~ /\.bead_model/i;
@@ -73,8 +84,11 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
     $fine = sprintf( "%.3f", $fine );
     $ufine = "$fine";
     $ufine =~ s/\./_/g;
-    $thisname = "${name}_f$ufine";
-    my $cmd = "$msrollcmd -m $name.xyzr -f $fine -t $thisname.c3p -p 0.0 2> $thisname.out";
+    $thisname = "${name}_f${ufine}";
+
+    ## run msroll
+
+    my $cmd = "$msrollcmd -m $name.xyzr -f $fine -t $thisname.c3p -v $thisname.c3v -p $proberadius 2> $thisname.out";
     print "Starting msroll fineness $fine\n";
     print "$cmd\n";
     print `$cmd`;
@@ -82,24 +96,119 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
     chomp $triangles;
     print "triangles '$triangles'\n";
     print "Finished msroll - triangles $triangles\n";
-    $ptriangles = '0'x(6-length("$triangles")) . $triangles;
-    my $fo = "${thisname}_$ptriangles";
-    print "$fo\n";
-    `mv $thisname.c3p $fo`;
 
-    $cmd = "perl ../c3p2beadmodel.pl $fo > $fo.bead_model";
+    ## optionally use rcoal
+
+    my $fo;
+
+    if ( $rcoal ) {
+        my $nmin = int( $triangles * .8 );
+        my $nmax = $triangles;
+        $nmin = $global_nmin if $global_nmin;
+        $nmax = $global_nmax if $global_nmax;
+        my $cmd;
+        $cmd = "cp $thisname.c3v $name.c3v; "; # ugh, why ?
+        $cmd .= "$rcoalcmd -f $thisname.c3p -nmax $nmax -nmin $nmin -n 6 2>&1 > ${thisname}_rcoal.out";
+        print "$cmd\n";
+        print `$cmd`;
+        die "rcoal failed on $thisname : $?\n" if $?;
+
+        my @tris = `grep "Actual coalesce n" ${thisname}_rcoal.out | awk '{ print \$4 }' | uniq`;
+        grep chomp, @tris;
+        my @ptris;
+        for my $tri ( @tris ) {
+            push @ptris, '0'x(5-length("$tri")) . $tri;
+        }
+        my @fos;
+
+        for my $ptri ( @ptris ) {
+            my $borkedname = "${name}_f0_$ptri";
+            my $correctname = "${thisname}_$ptri";
+            die "expected file $borkedname does not exist\n" if !-e $borkedname;
+            $cmd = "mv $borkedname $correctname";
+            print "$cmd\n";
+            print `$cmd`;
+            die "error with $cmd : $?\n" if $?;
+            push @fos, "${thisname}_$ptri";
+        }
+        for my $f ( @fos ) {
+            die "expected rcoal output file $f does not exist\n" if !-e $f;
+        }
+        print "triangles : " . join( ",", @tris );
+        print "\n";
+        print "ptriangles : " . join( ",", @ptris );
+        print "\n";
+        print "fos : " . join( ",", @fos );
+        print "\n";
+        for my $f ( @fos ) {
+            ## bead model (from rcoal)
+            my $fbm = "${f}_rcoal.bead_model";
+            die "bead model $fbm already exists\n" if -e $fbm;
+            $cmd = "$c3p2bmcmd $f > $fbm";
+            print "$cmd\n";
+            print `$cmd\n`;
+            die "cmd error $?\n" if $?;
+        }
+
+        ## assemble for best
+        my $count = scalar @tris;
+        die "tris not same length as fos\n" if $count != scalar @fos;
+        for ( my $i = 0; $i < $count; ++$i ) {
+            my $tri = $tris[$i];
+            my $f   = $fos[$i];
+            if ( $tri <= $maxtriangles ) {
+
+                $cmd = "$bestcmd -f $f -mw $mw -vc 2";
+                # print "$cmd\n";
+                $bestcmds{ $f } = $cmd;
+                $besttriangles{ $f } = $tri;
+            } else {
+                warn "too many triangles, skipping $f\n";
+            }
+        }
+        $fo = "$thisname.c3p";
+    } else {
+        $ptriangles = '0'x(5-length("$triangles")) . $triangles;
+        $fo = "${thisname}_$ptriangles";
+        print "$fo\n";
+        `cp $thisname.c3p $fo`;
+    }
+
+    ## msdraw (only for msr output, doens't work with rcoal output)
+    
+    # create script for msdraw
+    my $script = "molecule xyz
+read_polyhedron $fo
+xyz color=black
+"
+        ;
+    open OUT, ">${thisname}_msdraw.script";
+    print OUT $script;
+    close OUT;
+
+    $cmd = "$msdrawcmd -i ${thisname}_msdraw.script -p ${thisname}_msdraw.ps ps; ps2pdf ${thisname}_msdraw.ps";
+    print "$cmd\n";
+    print `$cmd`;
+
+    ## bead model (from msroll)
+
+    $cmd = "$c3p2bmcmd $fo > ${fo}_msr.bead_model";
     print "$cmd\n";
     print `$cmd\n`;
     die "cmd error $?\n" if $?;
 
-    if ( $triangles <= $maxtriangles ) {
+    ## assemble for best
 
-        $cmd = "$bestcmd -f $fo -mw $mw -vc 2";
-        # print "$cmd\n";
-        $bestcmds{ $fo } = $cmd;
-        $besttriangles{ $fo } = $triangles;
-    } else {
-        warn "too many triangles, skipping $fo\n";
+    if ( !$rcoal ) { # $rcoal assembles from rcoal output
+        if ( $triangles <= $maxtriangles ) {
+
+            $cmd = "$bestcmd -f $fo -mw $mw -vc 2";
+            # print "$cmd\n";
+            $bestcmds{ $fo } = $cmd;
+            $besttriangles{ $fo } = $triangles;
+        } else {
+            warn "too many triangles, skipping $fo\n";
+        }
     }
 }
 
@@ -120,7 +229,8 @@ for my $fo ( sort { triangle_val( $b ) <=> triangle_val( $a ) } keys %bestcmds )
 }
 $cmds .= "wait\n";
 
-die "testing\n";
+#print $cmds;
+#die "testing\n";
 
 print "Starting best in parallel with $maxproc processes\n";
 print $cmds;
@@ -151,5 +261,6 @@ $cmd .= join( ",", reverse @triangles );
 $cmd .= "]}'";
 
 print "cmd\n$cmd\n----\n";
+print `$cmd`;
 
 ## ~/ultrascan3-somo-dev/us_somo/bin/us_saxs_cmds_t.app/Contents/MacOS/us_saxs_cmds_t json '{"bestcsv":1,"files":["L10_A_f0_95_000740vcm.be","L10_A_f0_9_000940vcm.be"],"triangles":[740,940],"name":"L10_A"}'

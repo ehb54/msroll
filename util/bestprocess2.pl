@@ -1,20 +1,24 @@
 #!/usr/bin/perl
 
-$msrollcmd       = "/Users/eb/besttest/msroll/bin/msroll_xyzr";
-$msdrawcmd       = "/Users/eb/besttest/msroll/bin/msdraw";
-$bestcmd         = "/Users/eb/bin/bestnotty";
-$rcoalcmd        = "/Users/eb/bin/rcoalnotty";
-$ussaxsutilcmd   = ". ~/ultrascan3-somo-dev/qt5env;~/ultrascan3-somo-dev/us_somo/bin/us_saxs_cmds_t.app/Contents/MacOS/us_saxs_cmds_t";
-$c3p2bmcmd       = "/Users/eb/besttest/msroll/util/c3p2beadmodel.pl";
-$maxproc         = 3;
+$msrollcmd       = "~/srv/besttests/msroll/bin/msroll_xyzr";
+$msdrawcmd       = "~/srv/besttests/msroll/bin/msdraw";
+$bestcmd         = "~/srv/besttests/best/bin/best";
+$rcoalcmd        = "~/srv/besttests/best/bin/rcoal";
+$ussaxsutilcmd   = "env LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/home/ehb/ultrascan3/lib:/opt/qt-5.15.13/lib:/opt/qt-5.15.13-qwt-6.1.6/lib ~/ultrascan3/us_somo/bin64/us_saxs_cmds_t";
+$c3p2bmcmd       = "~/srv/besttests/msroll/util/c3p2beadmodel.pl";
+$maxproc         = 48;
 $maxtriangles    = 10000;
 
 $startfine   = .3;
-$endfine     = .6;
+$endfine     = 1;
 $deltafine   = 0.05;
-$proberadius = 1.5;
+$proberadius = "1.5";
 $global_nmin = 3000;
 $global_nmax = 6000;
+# for smaller bead tests
+#$global_nmin = 300;
+#$global_nmax = 600;
+$maxmodels    = 25;
 
 $notes = "
 usage: $0 {options} beadmodel
@@ -92,10 +96,20 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
     print "Starting msroll fineness $fine\n";
     print "$cmd\n";
     print `$cmd`;
+# msroll always seems to return a failure status
+#    if ( $? ) {
+#        warn "msroll returned status $? with fineness $fine\n";
+#        # next;
+#    }
     $triangles = `grep 'triangles written to disk' $thisname.out | awk '{ print \$1 }'`;
     chomp $triangles;
     print "triangles '$triangles'\n";
     print "Finished msroll - triangles $triangles\n";
+
+    if ( !($triangles > 0 ) ) {
+        warn "msroll returned zero triangles with fineness $fine, skipping\n";
+        next;
+    }
 
     ## optionally use rcoal
 
@@ -106,12 +120,19 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
         my $nmax = $triangles;
         $nmin = $global_nmin if $global_nmin;
         $nmax = $global_nmax if $global_nmax;
-        my $cmd;
-        $cmd = "cp $thisname.c3v $name.c3v; "; # ugh, why ?
+        my $cmd = '';
+        my $char23name  = substr( $thisname, 0, 23 );
+        my $char26name  = substr( $thisname, 0, 26 );
+        if ( $char23name ne $thisname ) {
+            $cmd .= "cp $thisname.c3v $char23name.c3v; "; 
+        }
         $cmd .= "$rcoalcmd -f $thisname.c3p -nmax $nmax -nmin $nmin -n 6 2>&1 > ${thisname}_rcoal.out";
         print "$cmd\n";
         print `$cmd`;
-        die "rcoal failed on $thisname : $?\n" if $?;
+        if ( $? ) {
+            warn "rcoal failed on $thisname : $?, skipping\n";
+            next;
+        }
 
         my @tris = `grep "Actual coalesce n" ${thisname}_rcoal.out | awk '{ print \$4 }' | uniq`;
         grep chomp, @tris;
@@ -122,15 +143,18 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
         my @fos;
 
         for my $ptri ( @ptris ) {
-            my $borkedname = "${name}_f0_$ptri";
             my $correctname = "${thisname}_$ptri";
-            die "expected file $borkedname does not exist\n" if !-e $borkedname;
-            $cmd = "mv $borkedname $correctname";
-            print "$cmd\n";
-            print `$cmd`;
-            die "error with $cmd : $?\n" if $?;
+            my $borkedname  = "${char26name}_$ptri";
+            if ( $borkedname ne $correctname ) {
+                die "expected file $borkedname does not exist\n" if !-e $borkedname;
+                $cmd = "mv $borkedname $correctname";
+                print "$cmd\n";
+                print `$cmd`;
+                die "error with $cmd : $?\n" if $?;
+            }
             push @fos, "${thisname}_$ptri";
         }
+
         for my $f ( @fos ) {
             die "expected rcoal output file $f does not exist\n" if !-e $f;
         }
@@ -140,6 +164,7 @@ for ( $fine = $startfine; $fine <= $endfine; $fine += $deltafine ) {
         print "\n";
         print "fos : " . join( ",", @fos );
         print "\n";
+
         for my $f ( @fos ) {
             ## bead model (from rcoal)
             my $fbm = "${f}_rcoal.bead_model";
@@ -209,6 +234,11 @@ xyz color=black
         } else {
             warn "too many triangles, skipping $fo\n";
         }
+    }
+
+    if ( scalar keys %bestcmds > $maxmodels ) {
+        print "stopping further models, exceeded maxmodels ($maxmodels)\n";
+        last;
     }
 }
 
